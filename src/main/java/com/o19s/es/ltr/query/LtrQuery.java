@@ -44,11 +44,15 @@ import java.util.Set;
 public class LtrQuery extends Query {
 
     /* The subqueries */
+    private final Query _prefetch;
     private final Query[] _features;
     private final Ranker _rankModel;
     private final String[] _featureNames;
 
-    public LtrQuery(Collection<Query> features, Ranker rankModel, Collection<String> featureNames) {
+    public LtrQuery(Collection<Query> features, Query prefetch, Ranker rankModel, Collection<String> featureNames) {
+        System.out.printf("LtrQuery.LtrQuery(), num features %d, has prefetch %b\n", features.size(), prefetch != null);
+        this._prefetch = prefetch;
+
         this._rankModel = rankModel;
         Objects.requireNonNull(features, "Collection of Querys must not be null");
 
@@ -80,7 +84,7 @@ public class LtrQuery extends Query {
     }
 
     private boolean equalsTo(LtrQuery other) {
-        return Arrays.equals(_features, other._features) && _rankModel.equals(other._rankModel);
+        return Arrays.equals(_features, other._features) && _rankModel.equals(other._rankModel) && _prefetch.equals(other._prefetch);
     }
 
 
@@ -89,6 +93,7 @@ public class LtrQuery extends Query {
         int h = classHash();
         h = 31 * h + Arrays.hashCode(_features);
         h = 31 * h + _rankModel.hashCode();
+        h = 31 * h + _prefetch.hashCode();
         return h;
     }
 
@@ -105,6 +110,7 @@ public class LtrQuery extends Query {
     protected class LtrWeight extends Weight {
         // The Weight's for our subqueries, in 1-1 correspondence with disjuncts
         protected final ArrayList<Weight> weights = new ArrayList<>(_features.length);
+        protected Weight prefetch;
 
         private final boolean _needsScores;
         private Similarity _similarity;
@@ -116,13 +122,15 @@ public class LtrQuery extends Query {
                 Query rewritten = feature.rewrite(searcher.getIndexReader());
                 weights.add(searcher.createWeight(rewritten, needsScores));
             }
+
+            this.prefetch = _prefetch.createWeight(searcher, needsScores);
             this._names = names;
             this._needsScores = needsScores;
             this._similarity = searcher.getSimilarity(needsScores);
         }
 
         @Override
-        public void extractTerms(Set<Term> terms) {
+        public void extractTerms(Set<Term> terms) { // TODO: @eugene what do this method do? Need prefetch?
             for (Weight weight : weights) {
                 weight.extractTerms(terms);
             }
@@ -186,6 +194,11 @@ public class LtrQuery extends Query {
 
         @Override
         public Scorer scorer(LeafReaderContext context) throws IOException {
+            Scorer prefetchScorer = prefetch.scorer(context);
+            if (prefetchScorer == null) {
+                return null;
+            }
+
             List<Scorer> scorers = new ArrayList<>(weights.size());
             for (Weight w : weights) {
                 // we will advance() subscorers
@@ -197,10 +210,11 @@ public class LtrQuery extends Query {
                 }
             }
             if (scorers.isEmpty()) {
+                // TODO: @eugene wtf here? Ignore noop?
                 // no sub-scorers had any documents
                 return null;
             } else {
-                return new LtrScorer(this, scorers, _needsScores, context, _rankModel);
+                return new LtrScorer(this, prefetchScorer, scorers, _needsScores, context, _rankModel);
             }
         }
     }

@@ -34,13 +34,22 @@ public class LtrScorer extends Scorer {
     Ranker _rankModel;
     List<Scorer> _subScorers;
     DocIdSetIterator _allDocsIter;
+    Scorer _prefetch;
 
-    protected LtrScorer(Weight weight, List<Scorer> subScorers, boolean needsScores,
+    static int scorerCounter = 0;
+    int scorerNum = 0;
+
+    protected LtrScorer(Weight weight, Scorer prefetch, List<Scorer> subScorers, boolean needsScores,
                         LeafReaderContext context, Ranker rankModel) {
         super(weight);
+
+        scorerNum = scorerCounter++;
+
         this._rankModel = rankModel;
         _subScorers = subScorers;
         _allDocsIter = DocIdSetIterator.all(context.reader().maxDoc());
+        System.out.printf("LtrScorer has1 prefetch: %b\n", prefetch != null);
+        _prefetch = prefetch;
     }
 
 
@@ -49,6 +58,8 @@ public class LtrScorer extends Scorer {
         DataPoint allScores = new DenseProgramaticDataPoint(_subScorers.size());
         int featureIdx = 1; // RankLib is 1-based
         for (Scorer scorer : _subScorers) {
+            System.out.printf("Scorer %d docid %d, docid %d\n", scorerNum, scorer.docID(), docID());
+
             if (scorer.docID() < docID()) {
                 scorer.iterator().advance(docID());
             }
@@ -56,18 +67,18 @@ public class LtrScorer extends Scorer {
             if (scorer.docID() == docID()) {
                 featureVal = scorer.score();
             }
-            //System.out.printf("Doc %d, feature %d, val %f\n", docID(), featureIdx, featureVal);
+            System.out.printf("Doc %d, feature %d, val %f\n", docID(), featureIdx, featureVal);
             allScores.setFeatureValue(featureIdx, featureVal);
             featureIdx++;
         }
         float score = (float)_rankModel.eval(allScores);
-        //System.out.printf("Doc %d, score %f\n", docID(), score);
+        System.out.printf("Scorer %d Doc %d, score %f\n", scorerNum, docID(), score);
         return score;
     }
 
     @Override
     public int docID() {
-        return _allDocsIter.docID();
+        return _prefetch.docID();
     }
 
     @Override
@@ -77,6 +88,6 @@ public class LtrScorer extends Scorer {
 
     @Override
     public DocIdSetIterator iterator() {
-        return _allDocsIter;
+        return _prefetch.iterator();
     }
 }

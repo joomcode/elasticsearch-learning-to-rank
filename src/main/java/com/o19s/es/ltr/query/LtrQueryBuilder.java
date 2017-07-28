@@ -44,6 +44,7 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
 
     Script _rankLibScript;
     List<QueryBuilder> _features;
+    QueryBuilder _prefetchQuery;
 
     static {
         PARSER = new ObjectParser<>(NAME, LtrQueryBuilder::new);
@@ -55,6 +56,9 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
         PARSER.declareField(
                 (parser, ltr, context) -> ltr.rankerScript(Script.parse(parser, "ranklib")),
                 new ParseField("model"), ObjectParser.ValueType.OBJECT_OR_STRING);
+        PARSER.declareField(
+                (parser, ltr, context) -> ltr.prefetchQuery(context.parseInnerQueryBuilder().get()),
+                new ParseField("prefetch"), ObjectParser.ValueType.OBJECT);
     }
 
 
@@ -63,6 +67,7 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
 
     public LtrQueryBuilder(StreamInput in) throws IOException {
         super(in);
+        assert false;
         _features = readQueries(in);
         _rankLibScript = new Script(in);
     }
@@ -72,14 +77,17 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
         // only the superclass has state
         writeQueries(out, _features);
         _rankLibScript.writeTo(out);
+        out.writeNamedWriteable(_prefetchQuery);
     }
 
     @Override
     protected void doXContent(XContentBuilder builder, Params params) throws IOException {
+        assert false;
         builder.startObject(NAME);
         printBoostAndQueryName(builder);
         doXArrayContent("features", this._features, builder, params);
         builder.field("model", _rankLibScript);
+        builder.field("prefetch", _features);
         builder.endObject();
     }
 
@@ -106,6 +114,10 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
             throw new ParsingException(parseContext.parser().getTokenLocation(),
                     "[ltr] query requires a model, none specified");
         }
+        if (builder._prefetchQuery == null) {
+            throw new ParsingException(parseContext.parser().getTokenLocation(),
+                    "[ltr] query requires a prefetch query, none specified");
+        }
         return builder;
     }
 
@@ -124,7 +136,7 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
         RankLibScriptEngine.RankLibExecutableScript rankerScript =
                 (RankLibScriptEngine.RankLibExecutableScript)context.getExecutableScript(_rankLibScript, ScriptContext.Standard.SEARCH);
 
-        return new LtrQuery(asLQueries, (Ranker)rankerScript.run(), featureNames);
+        return new LtrQuery(asLQueries, _prefetchQuery.toQuery(context), (Ranker)rankerScript.run(), featureNames);
     }
 
     @Override
@@ -154,6 +166,11 @@ public class LtrQueryBuilder extends AbstractQueryBuilder<LtrQueryBuilder> {
     public List<QueryBuilder> features() {return _features;}
     public final LtrQueryBuilder features(List<QueryBuilder> features) {
         _features = features;
+        return this;
+    }
+
+    public final LtrQueryBuilder prefetchQuery(QueryBuilder prefetch) {
+        _prefetchQuery = prefetch;
         return this;
     }
 
